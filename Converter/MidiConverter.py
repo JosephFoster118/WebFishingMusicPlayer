@@ -168,11 +168,12 @@ class MidiTrack:
         return f"{self.track_name} ({self.instrument}, {self.tempo} BPM): {self.notes}"
     
     def to_dict(self):
+        sorted_notes = sorted(self.notes, key=lambda note: note.position)
         return {
             'track_name': self.track_name,
             'instrument': self.instrument,
             'tempo': self.tempo,
-            'notes': [note.to_dict() for note in self.notes]
+            'notes': [note.to_dict() for note in sorted_notes]
         }
     
 class MidiConverter:
@@ -220,6 +221,27 @@ class MidiConverter:
             'tracks': {name: track.to_dict() for name, track in self.tracks.items()}
         }
 
+def cleanUp(converter):
+
+    for track in converter.tracks.values():
+        notes_by_position = {}
+        for note in track.notes:
+            position = note.position
+            if position not in notes_by_position:
+                notes_by_position[position] = []
+            notes_by_position[position].append(note)
+        
+        cleaned_notes = []
+        for position, notes in notes_by_position.items():
+            if len(notes) > 1:
+                notes.sort(key=lambda x: x.note)
+                cleaned_notes.append(notes[-1])
+            else:
+                cleaned_notes.append(notes[-1])
+        
+        track.notes = cleaned_notes
+    
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert MIDI files to JSON.")
     parser.add_argument("-i", "--input", required=True, help="Input MIDI file")
@@ -228,6 +250,8 @@ if __name__ == "__main__":
 
     converter = MidiConverter(args.input)
     converter.printTrackInfo()
+
+    cleanUp(converter)
 
     # Convert to JSON
     json_data = json.dumps(converter.to_dict(), indent=4)

@@ -5,7 +5,9 @@
 #include <thread>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include "json.hpp"
+#include "argparse.hpp"
 
 using json = nlohmann::json;
 
@@ -65,7 +67,7 @@ double getCurrentTime()
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count() / 1e9;
 }
 
-void playTrack(const std::string& filename, const std::string& track_name)
+void playTrack(const std::string& filename, const std::string& track_name, double tempo_factor = 1.0, int note_shift = 0)
 {
     std::ifstream file(filename);
     json j;
@@ -76,7 +78,10 @@ void playTrack(const std::string& filename, const std::string& track_name)
     std::vector<MusicNote> notes;
     for (const auto& note : notes_json)
     {
-        notes.push_back(MusicNote::from_json(note));
+        auto note_obj = MusicNote::from_json(note);
+        note_obj.position /= tempo_factor;
+        note_obj.duration /= tempo_factor;
+        notes.push_back(note_obj);
     }
 
     //Print number of notes
@@ -91,8 +96,8 @@ void playTrack(const std::string& filename, const std::string& track_name)
     double start_time = getCurrentTime();
     for(int i = 0; i < notes.size(); i++)
     {
-        std::cout << "Playing note " << i << " at position " << std::fixed << std::setw(8) << std::setprecision(4) << notes[i].position << " with pitch " << notes[i].note << std::endl;
-        pressNote(notes[i].note - 24);
+        std::cout << "Playing note " << i << " at position " << std::fixed << std::setw(8) << std::setprecision(4) << notes[i].position << " with pitch " << notes[i].note + note_shift << std::endl;
+        pressNote(notes[i].note + note_shift);
 
         if(i < notes.size() - 1)
         {
@@ -109,11 +114,82 @@ void playTrack(const std::string& filename, const std::string& track_name)
 
 }
 
-int main()
+struct ProgramArguements
 {
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-    const std::string filename = "./ConvertedSongs/bike2.json";
-    std::cout << "Playing " << filename << std::endl;
-    playTrack(filename, "Track 2");
+    double start_delay;
+    double tempo_factor;
+    std::string input_file_path;
+    std::string track_name;
+    int note_shift;
+};
+
+std::optional<ProgramArguements> processArguments(int argc, char* argv[])
+{
+    argparse::ArgumentParser arguments("player.exe", "1.0", argparse::default_arguments::none);
+    arguments.add_argument("-d", "--delay")
+        .help("Delay before playing the song in seconds")
+        .default_value(5.0)
+        .scan<'g', double>();
+    arguments.add_argument("-i", "--input_file")
+        .help("Input file path")
+        .required();
+    arguments.add_argument("-t", "--track")
+        .help("Track name")
+        .required();
+    arguments.add_argument("-f", "--tempo_factor")
+        .help("Tempo factor")
+        .default_value(1.0)
+        .scan<'g', double>();
+    arguments.add_argument("-s", "--note_shift")
+        .help("Shifts the notes played by this amount")
+        .default_value(0)
+        .scan<'i', int>();
+
+    try
+    {
+        arguments.parse_args(argc, argv);
+    }
+    catch (const std::runtime_error& err)
+    {
+        std::cerr << err.what() << std::endl;
+        std::cerr << arguments;
+        return std::nullopt;
+    }
+
+    ProgramArguements program_arguements;
+    program_arguements.start_delay = arguments.get<double>("-d");
+    program_arguements.input_file_path = arguments.get<std::string>("-i");
+    program_arguements.track_name = arguments.get<std::string>("-t");
+    program_arguements.tempo_factor = arguments.get<double>("-f");
+    program_arguements.note_shift = arguments.get<int>("-s");
+
+    if (program_arguements.tempo_factor <= 0)
+    {
+        std::cerr << "Tempo factor must be greater than 0" << std::endl;
+        return std::nullopt;
+    }
+
+    return program_arguements;
+}
+
+
+int main(int argc, char* argv[])
+{
+    auto arguemnts = processArguments(argc, argv);
+
+    if(!arguemnts)
+    {
+        return -1;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds((int)(arguemnts->start_delay * 1000)));
+    std::cout << "Playing " << arguemnts->input_file_path << " (" <<  arguemnts->track_name << ") with tempo factor " << arguemnts->tempo_factor <<
+        " and a note shift of " << arguemnts->note_shift << std::endl;
+    playTrack(
+        arguemnts->input_file_path,
+        arguemnts->track_name,
+        arguemnts->tempo_factor,
+        arguemnts->note_shift
+    );
     return 0;
 }
